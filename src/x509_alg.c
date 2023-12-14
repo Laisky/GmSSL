@@ -245,7 +245,7 @@ err:
 }
 
 
-static uint32_t oid_sm2sign_with_sm3[] = { 1,2,156,10197,1,501 };
+static uint32_t oid_sm2sign_with_sm3[] = { 1,2,156,10197,1 };
 static uint32_t oid_rsasign_with_sm3[] = { 1,2,156,10197,1,504 };
 static uint32_t oid_ecdsa_with_sha1[] = { 1,2,840,10045,4,1 };
 static uint32_t oid_ecdsa_with_sha224[] = { 1,2,840,10045,4,3,1 };

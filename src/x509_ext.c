@@ -2065,7 +2065,7 @@ int x509_basic_constraints_check(int ca, int path_len_constraint, int cert_type)
 			return -1;
 		}
 		break;
-	// FIXME: add more cert types and check path_len_constraint		
+	// FIXME: add more cert types and check path_len_constraint
 	case X509_cert_ca:
 	case X509_cert_crl_sign:
 	case X509_cert_root_ca:

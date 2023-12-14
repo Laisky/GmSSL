@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <gmssl/mem.h>
 #include <gmssl/rand.h>
 #include <gmssl/pkcs8.h>
@@ -37,6 +38,7 @@ static const char *options =
 	" [-crl_http_uri uri] [-crl_ldap_uri uri]"
 	" [-inhibit_any_policy num]"
 	" [-ca_issuers_uri uri] [-ocsp_uri uri uri]"
+	" [-policy str]"
 	" [-out pem]";
 
 static char *usage =
@@ -100,6 +102,7 @@ static char *usage =
 "    -inhibit_any_policy num      Set skipCerts number of InhibitAnyPolicy extension\n"
 "    -ca_issuers_uri uri          Set URI of the CA certificate in DER-encoding o FreshestCRL extension\n"
 "    -ocsp_uri uri                Set OCSP URI of FreshestCRL extension\n"
+"    -policy str                  Set policy of CertificatePolicies extension\n"
 "\n"
 "Examples\n"
 "\n"
@@ -124,6 +127,36 @@ static int ext_key_usage_set(int *usages, const char *usage_name)
 	}
 	*usages |= flag;
 	return 1;
+}
+
+/**
+ * @brief convert policy string to uint8_t array
+*/
+size_t convert_policy_to_uint8_array(const char *policy_str, uint8_t *array, size_t max_size) {
+    if (!policy_str || !array) {
+        return 0;
+    }
+
+    const char *token;
+    char *policy_dup = strdup(policy_str); // Duplicate to avoid modifying the original string
+    if (!policy_dup) {
+        return 0;
+    }
+
+    token = strtok(policy_dup, "."); // Split input by periods
+    size_t arr_len = 0;
+    while (token && arr_len < max_size) {
+        int num = atoi(token);
+        if (num < 0 || num > 65535) {
+            free(policy_dup);
+            return 0;
+        }
+        array[arr_len++] = (uint8_t)num;
+        token = strtok(NULL, ".");
+    }
+
+    free(policy_dup);
+    return arr_len; // Return the length of the array filled with data
 }
 
 int certgen_main(int argc, char **argv)
@@ -203,6 +236,9 @@ int certgen_main(int argc, char **argv)
 	// FreshestCRL
 	char *ca_issuers_uri = NULL;
 	char *ocsp_uri = NULL;
+
+	// Policy Identifiers
+	char *policy = NULL;
 
 
 	argc--;
@@ -362,6 +398,30 @@ int certgen_main(int argc, char **argv)
 				fprintf(stderr, "%s: open '%s' failure : %s\n", prog, outfile, strerror(errno));
 				goto end;
 			}
+		} else if (!strcmp(*argv, "-policy")) {
+			if (--argc < 1) goto bad;
+			// append to policy with delimiter
+			if (policy) {
+				char *p = policy;
+				policy = malloc(strlen(p) + strlen(*(++argv)) + 2);
+				if (policy == NULL) {
+					fprintf(stderr, "Failed to allocate memory for policy.\n");
+					free(p);
+					goto bad;
+				}
+				strcpy(policy, p);
+				strcat(policy, ";");
+				strcat(policy, *argv);
+				free(p);
+			} else {
+				char *nextArg = *(++argv);
+				policy = malloc(strlen(nextArg) + 1);
+				if (policy == NULL) {
+					fprintf(stderr, "Failed to allocate memory for policy.\n");
+					goto bad;
+				}
+				strcpy(policy, nextArg);
+			}
 		} else {
 			fprintf(stderr, "%s: illegal option '%s'\n", prog, *argv);
 			goto end;
@@ -442,6 +502,46 @@ bad:
 			goto end;
 		}
 	}
+    if (policy) {
+        char *policy_dup = strdup(policy); // Duplicate policy to avoid modifying the original
+        if (!policy_dup) {
+            fprintf(stderr, "strdup() failed.\n");
+            goto end;
+        }
+
+        printf("Policy: %s\n", policy_dup);
+        char *token = strtok(policy_dup, ";");
+        while (token) {
+			printf(" > Processing policy part: %s\n", token);
+
+			// convert token to uint8_t string array
+			size_t token_len = strlen(token);
+			uint8_t *array = malloc(sizeof(uint8_t) * (token_len + 1)); // +1 for null terminator
+			if (!array) {
+				fprintf(stderr, "malloc() failed.\n");
+				free(policy_dup);
+				goto end;
+			}
+			for (size_t i = 0; i < token_len; i++) {
+				array[i] = (uint8_t)token[i];
+			}
+			array[token_len] = '\0'; // null terminate the array
+
+			if (x509_exts_add_certificate_policies(exts, &extslen, sizeof(exts), X509_non_critical, array, token_len) != 1) {
+				fprintf(stderr, "failed to x509_exts_add_certificate_policies() %s\n", token);
+				free(policy_dup);
+				free(array);
+				goto end;
+			}
+
+			token = strtok(NULL, ";");
+			printf(" > Next token: %s\n", token);
+			free(array);
+		}
+
+        free(policy_dup); // Free duplicated policy string
+    }
+
 	// no CertificatePolicies
 	// no PolicyMappings
 	if (subject_alt_name_len) {
